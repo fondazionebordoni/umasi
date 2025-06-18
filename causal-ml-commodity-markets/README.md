@@ -13,6 +13,7 @@ To address these challenges, we adopt a **Causal Machine Learning** approach usi
 - **Treatment**: Futures prices  
 - **Outcome**: Spot prices  
 - **Heterogeneity**: Speculative intensity (proxied by non-commercial open interest)
+![dag](images/causal_framework.png)
 
 ### Key Findings
 
