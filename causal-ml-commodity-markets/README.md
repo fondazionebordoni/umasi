@@ -54,3 +54,4 @@ The core analysis is implemented in a python notebook included in this repositor
 This project is licensed under the MIT License. See the `LICENSE` file for details.
 
    
+![fub_logo](images/fub_logo.jpeg)
