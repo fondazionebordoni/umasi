@@ -11,7 +11,7 @@ This repository contains the code and data for the **UMASI Project**, which stud
 
 
 **Paper "Speculation, Price Transmission, and Efficiency in the Orange Juice Market: A Causal Machine Learning Approach"**
-> 📄 **Status**: *Submitted for publication - Currently under peer review*
+> 📄 **Status**: *Submitted for publication - Awaiting Editorial Coordinator Processing*
 
 📁 **Repository**: [causal-ml-commodity-markets](https://github.com/fondazionebordoni/umasi/tree/main/causal-ml-commodity-markets)
 - Adopts **Double Machine Learning (DML)** methodology
