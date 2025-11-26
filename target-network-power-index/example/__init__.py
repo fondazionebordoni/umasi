@@ -1,0 +1,1 @@
+# init per l'esempio di utilizzo del codice
