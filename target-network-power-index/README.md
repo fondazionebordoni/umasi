@@ -65,6 +65,7 @@ target-network-power-index/
 │ ├─ simulations.py # Stress testing modules
 │
 ├─ example/
+│ ├─ index_validation.py # Validates the stability and consistency of Mizuno indexes
 │ ├─ calculate_network_index.py # Computes indexes for any graph (4 scenarios)
 │ ├─ first_simulation.py # Stress test: incremental increases by top shareholders
 │ ├─ second_simulation.py # Stress test: coordinated increases by a conglomerate
