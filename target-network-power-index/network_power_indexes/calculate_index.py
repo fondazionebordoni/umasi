@@ -376,7 +376,7 @@ def run_simulation_block(T_chunk, seed, x, v, labels, idx_E, q_j, d, init_prob, 
 
     return NPI_global, NPF_global, NPI_to_E, NPF_to_E, total_step
 
-def calculate_index(subgraph, target):
+def calculate_index(subgraph, target, T = 20000):
     """
     Main function computing influence/power indices over a given subgraph.
     """
@@ -447,7 +447,7 @@ def calculate_index(subgraph, target):
     total_perc = sum(subgraph[u][v]["weight"] for u, v in subgraph.in_edges(target)) / 100
     print(f"Total shareholding of {target} in the subgraph: {round(total_perc * 100, 2)}%")
 
-    T = 20000                  # Monte Carlo iterations
+    # T: Monte Carlo iterations
     max_cores = 16
     n_jobs = min(cpu_count(), max_cores)
     T_chunk = T // n_jobs
@@ -706,3 +706,4 @@ def add_index_to_graph_old(npi_df, npf_df, graph):
             ].values[0] * 100
 
     return subgraph
+
