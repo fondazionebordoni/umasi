@@ -13,6 +13,7 @@ from multiprocessing import cpu_count
 import numpy as np
 import pandas as pd
 from rich import print
+import scipy.sparse as sp
 
 # ---------------------------
 # Libraries for parallelization
@@ -272,6 +273,15 @@ def convert_x(x):
 # Monte Carlo simulation block
 # ---------------------------
 def run_simulation_block(T_chunk, seed, x, v, labels, idx_E, q_j, d, init_prob, burn_in, steps, steps_rev):
+    """
+    This function defines a simulation block. It computes the raw index.
+
+    OPTIMIZATION (point 1): NPF → target propagation has been vectorized
+    using sparse matrix–vector multiplication with scipy.sparse.
+    Instead of iterating over each source node k separately (O(n² × steps_rev)),
+    a matrix P is propagated simultaneously, where P[:, k] represents
+    the influence originating from node k. Complexity is reduced to O(nnz × steps_rev).
+    """
     rng = np.random.default_rng(seed)
     n = len(labels)
     N = list(range(n))
@@ -286,8 +296,11 @@ def run_simulation_block(T_chunk, seed, x, v, labels, idx_E, q_j, d, init_prob, 
     L_I = np.arange(n)
     t_initialize = 0
 
+    # Precompute dictionaries {owner_id: share} for O(1) lookup
+    x_dict = [dict(zip(entry["owners"], entry["shares"])) for entry in x]
+
     for t in range(1, T_chunk + 1):
-        # Random reset / initialisation
+        # Initial / random reset
         if t == 1 or rng.random() < init_prob:
             t_initialize = t
             L_D = np.arange(n)
@@ -299,25 +312,19 @@ def run_simulation_block(T_chunk, seed, x, v, labels, idx_E, q_j, d, init_prob, 
                 m = len(owners_j)
                 U_seen = {}
                 rows = []
-
                 for k in range(m):
                     i = owners_j[k]
                     uo = L_I[i]
-
                     if uo not in U_seen:
                         U_seen[uo] = rng.random()
-
                     tag_uo = U_seen[uo]
                     tie = rng.random()
-
                     rows.append((tag_uo, tie, i))
-
                 rows.sort(key=lambda tup: (tup[0], tup[1]))
 
                 xsum = 0.0
                 for (_, _, i_sorted) in rows:
-                    pos = owners_j.index(i_sorted)
-                    xsum += shares_j[pos]
+                    xsum += x_dict[j][i_sorted]  # O(1) instead of owners_j.index()
                     if xsum >= q_j:
                         L_D[j] = i_sorted
                         L_I[j] = L_I[i_sorted]
@@ -326,53 +333,54 @@ def run_simulation_block(T_chunk, seed, x, v, labels, idx_E, q_j, d, init_prob, 
         if (t - t_initialize) >= burn_in:
             total_step += 1
 
-            # --------------------------- NPF global ---------------------------
+            # --------------------------- Global NPF [VECTORIZED] ---------------------------
+            # B[i,j] = d if L_D[j]=i and j!=i → p_next = B @ p + v
+            _mask_B = L_D != np.arange(n)
+            B = sp.csr_matrix(
+                (np.full(_mask_B.sum(), d), (L_D[_mask_B], np.where(_mask_B)[0])),
+                shape=(n, n)
+            )
             p = v.copy()
-            p_next = np.zeros(n)
             for _ in range(steps):
-                for j in N:
-                    i = L_D[j]
-                    if j != i:
-                        p_next[i] += d * p[j]
-                p_next += v
-                p, p_next = p_next, np.zeros(n)
+                p = B @ p + v
             NPF_global += p
 
-            # --------------------------- NPI global ---------------------------
-            for j in N:
-                NPI_global[L_I[j]] += v[j]
+            # --------------------------- Global NPI [VECTORIZED] ---------------------------
+            np.add.at(NPI_global, L_I, v)
 
             # --------------------------- NPI → target -------------------------
             uoE = L_I[idx_E]
             NPI_to_E[uoE] += v[idx_E]
 
-            # --------------------------- NPF → target -------------------------
-            children = [[] for _ in range(n)]
+            # =====================================================================
+            # NPF → target  [OPTIMIZED with scipy.sparse]
+            # =====================================================================
+            # Build propagation matrix A (sparse):
+            #   A[child, parent] = d for each edge child <- parent in L_D
+            #   Columns of idx_E are excluded (original children[idx_E] = [])
+            rows_A, cols_A = [], []
             for j in N:
-                i = L_D[j]
-                if j != i:
-                    children[i].append(j)
-            children[idx_E] = []
+                i = int(L_D[j])
+                if j != i and i != idx_E:   # block propagation FROM idx_E
+                    rows_A.append(j)
+                    cols_A.append(i)
 
-            for k in N:
-                p_rev = np.zeros(n)
-                p_rev[k] = v[k]
-                p_next = np.zeros(n)
-                acc_E = 0.0
+            if rows_A:
+                A = sp.csr_matrix(
+                    (np.full(len(rows_A), d), (rows_A, cols_A)), shape=(n, n)
+                )
+            else:
+                A = sp.csr_matrix((n, n))
 
-                for _ in range(steps_rev):
-                    acc_E += p_rev[idx_E]
-
-                    for i in N:
-                        if children[i]:
-                            contrib = d * p_rev[i]
-                            if contrib != 0.0:
-                                for cj in children[i]:
-                                    p_next[cj] += contrib
-
-                    p_rev, p_next = p_next, np.zeros(n)
-
-                NPF_to_E[k] += acc_E
+            # P[:, k] = propagation state starting from node k
+            # Initialization: P = diag(v) → each column k starts from v[k]
+            P = np.diag(v.astype(float))
+            acc = np.zeros(n)
+            for _ in range(steps_rev):
+                acc += P[idx_E, :]          # amount reaching idx_E from each k
+                P = A @ P                   # propagate one step (sparse × dense)
+            NPF_to_E += acc
+            # =====================================================================
 
     return NPI_global, NPF_global, NPI_to_E, NPF_to_E, total_step
 
@@ -706,4 +714,5 @@ def add_index_to_graph_old(npi_df, npf_df, graph):
             ].values[0] * 100
 
     return subgraph
+
 
